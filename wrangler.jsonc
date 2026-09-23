@@ -1,0 +1,45 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "simple-qr-contact-webapp",
+	"main": "src/entry.py",
+	"compatibility_date": "2025-11-02",
+	"compatibility_flags": [
+		"python_workers"
+	],
+	"observability": {
+		"enabled": true
+	},
+	"rules": [
+		{
+			"type": "Data",
+			"globs": [
+				"**/*.png"
+			],
+			"fallthrough": true
+		},
+		{
+			"type": "Text",
+			"globs": [
+				"**/*.svg"
+			],
+			"fallthrough": true
+		}
+	],
+	"assets": {
+		"directory": "./site",
+		"not_found_handling": "404-page",
+		// The Worker only ever sees /api and /api/*. Every other path is a static
+		// asset, and default html_handling gives clean URLs (site/sig/index.html
+		// -> /sig). "/api" is listed separately because "/api/*" does not match
+		// the bare path, which would otherwise fall through to the 404 page.
+		"run_worker_first": [
+			"/api",
+			"/api/*"
+		]
+	}
+	// To serve this on apps.labor.maryland.dev, add the custom domain below and
+	// redeploy. Left commented so a deploy cannot claim the hostname by surprise.
+	// "routes": [
+	// 	{ "pattern": "apps.labor.maryland.dev", "custom_domain": true }
+	// ]
+}
