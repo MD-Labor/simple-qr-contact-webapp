@@ -44,15 +44,19 @@ function splitName(full) {
 
 /* '4105550100' -> '(410) 555-0100', formatting as far as the digits reach.
  *
- * Anything that is not a plain North American number - an international number,
- * a number with an extension - is returned untouched rather than reshaped into
- * something wrong. Same principle as normalize_phone() in src/mecard.py: a
- * mangled number is worse than an unformatted one. */
+ * Ten digits, and only ever ten. Every number this form collects is US, so there
+ * is no international case to keep intact and no reason to accept an eleventh
+ * digit: anything past the tenth is dropped as it is typed. The alphabet that
+ * survives is digits plus the '()- ' the formatter itself inserts - letters,
+ * '+', '.' and an 'x1234' extension are all stripped out.
+ *
+ * A country-code 1 is absorbed rather than counted, so pasting '+1 410 555 0100'
+ * still lands on '(410) 555-0100' instead of shifting every digit one place. */
 function formatPhone(raw) {
-	const digits = String(raw).replace(/\D/g, '');
-	if (digits.length > 11 || (digits.length === 11 && digits[0] !== '1')) return raw;
+	let digits = String(raw).replace(/\D/g, '');
+	if (digits.length > 10 && digits[0] === '1') digits = digits.slice(1);
 
-	const local = digits.length === 11 ? digits.slice(1) : digits;
+	const local = digits.slice(0, 10);
 	if (!local) return '';
 	// The parens appear only once there is a fourth digit, so backspacing out of
 	// a 3-digit area code does not fight a bracket the user cannot delete.
