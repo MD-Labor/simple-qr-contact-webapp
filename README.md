@@ -39,7 +39,9 @@ Two deliberate choices there:
 - **The QR code is not part of the signature.** It has its own section on the page, and the copy button copies only the signature table. A QR embedded in a signature has to be fetched from this origin on every send, and recipients on other networks frequently would not see it at all — so it's offered as a download instead.
 - **The QR request is debounced.** Without it, the API was asked to render every prefix of the name as it was typed, and a half-typed name could still be the image on screen when the final request lost the race.
 
-Phone fields format as you type — `4105550100` becomes `(410) 555-0100`. Anything that isn't a plain North American number (an international number, a number with an extension) is left exactly as entered rather than reshaped into something wrong.
+Phone fields format as you type — `4105550100` becomes `(410) 555-0100` — and hold **ten digits, no more**. Digits past the tenth are dropped as they're typed, and the only characters that survive are digits and the `()-` and space the formatter inserts itself. A leading country-code `1` is absorbed rather than counted, so pasting `+1 410 555 0100` still lands correctly.
+
+Ten digits is a deliberate narrowing, not a limitation to work around: every number this form collects is US, and an unbounded field accepted `(555) 555-5555555555` as a valid-looking entry. The cost is that a pasted international number is reshaped into a wrong US number instead of being left intact, and an extension (`555-0100 x3`) is dropped. Distinguishing the two would mean accepting `+`, which reopens the same hole. If a non-US number is ever genuinely needed, call `/api/vcard` directly — the API normalizes but does not restrict.
 
 ## Setup
 
@@ -172,9 +174,9 @@ Both image endpoints accept:
 | `logo` | `md` for the Maryland logo, or `none` for a bare code. | `md` |
 | `ec` | Error correction: `L`, `M`, `Q`, `H`. | `Q` with a logo, else `M` |
 | `scale` | Logo size as a fraction of the QR width. | `0.22` |
-| `fg` / `color` | Foreground color. | `black` |
-| `bg` | Background color, or `transparent`. | `white` |
-| `backing` | Solid color drawn behind the logo. | `white` |
+| `fg` / `color` | Foreground color. Name, hex, or `rgb()`/`hsl()`; 64 characters max. | `black` |
+| `bg` | Background color, or `transparent`. Same grammar as `fg`. | `white` |
+| `backing` | Solid color drawn behind the logo. Same grammar as `fg`. | `white` |
 | `square` | `1` to force a square logo backing. | off |
 | `box` | Pixels per QR module, 1–40. PNG output is additionally capped at 2048px on a side. | `10` |
 
@@ -336,7 +338,11 @@ Higher error correction means more modules, so the code becomes denser at the sa
 
 ## Colors
 
-Colors accept anything Pillow accepts for raster output (CSS named colors, `#rgb`, `#rrggbb`) and anything valid as an SVG `fill` attribute for SVG output. In practice, named colors and 6-digit hex codes work in both.
+The CLI passes colors straight through: anything Pillow accepts for raster output (CSS named colors, `#rgb`, `#rrggbb`) and anything valid as an SVG `fill` attribute for SVG output. In practice, named colors and 6-digit hex codes work in both.
+
+The API is stricter, because its colors come from the query string of an anonymous request: `fg` / `color`, `bg`, and `backing` must be a color name, a `#rgb` / `#rgba` / `#rrggbb` / `#rrggbbaa` hex code, or an `rgb()` / `rgba()` / `hsl()` / `hsla()` value, and at most 64 characters. Anything else is a `400`.
+
+Passing that grammar doesn't mean every renderer can read the value. PNG output goes through Pillow, which wants comma-separated arguments and an integer 0–255 alpha — `rgba(255, 0, 0, 128)` and `hsl(210, 100%, 50%)` work, `rgba(255, 0, 0, 0.5)` and `hsl(210 100% 50%)` don't, and `transparent` is a background-only value there. SVG takes all of them. A color the SVG path accepts but Pillow rejects also comes back as a `400`, naming the value. Named colors and hex codes work everywhere.
 
 Keep contrast high. Very light foreground or very dark background will make the code hard to scan — aim for at least a 4.5:1 contrast ratio between foreground and background.
 

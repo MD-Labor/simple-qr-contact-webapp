@@ -302,14 +302,22 @@ def render_svg(
     ]
     if not is_transparent(bg):
         parts.append(f'<rect width="100%" height="100%" fill="{bg_e}"/>')
+    # The foreground colour goes on a wrapping <g>, not on each module rect: a
+    # version-40 code has ~15,000 dark modules, so a per-rect fill would make
+    # the document (and peak memory while building it) scale with
+    # len(fg) x module count, both of which a caller picks. The modules inherit
+    # the group's fill; the logo and its backing stay outside it so they keep
+    # their own colours.
+    parts.append(f'<g fill="{fg_e}">')
     for y, row in enumerate(matrix):
         for x, cell in enumerate(row):
             if cell:
                 px = (x + border) * box
                 py = (y + border) * box
                 parts.append(
-                    f'<rect x="{px}" y="{py}" width="{box}" height="{box}" fill="{fg_e}"/>'
+                    f'<rect x="{px}" y="{py}" width="{box}" height="{box}"/>'
                 )
+    parts.append("</g>")
     if logo is not None:
         max_dim = total * logo_scale
         aspect = get_logo_aspect(logo)
