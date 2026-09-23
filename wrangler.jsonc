@@ -1,6 +1,10 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "simple-qr-contact-webapp",
+	// Must match the Worker that already owns apps.labor.maryland.dev and the
+	// Access policy - NOT this repository's name. wrangler deploys by this field,
+	// so "simple-qr-contact-webapp" would silently create a second, bare Worker
+	// and leave the real one untouched.
+	"name": "intranet-apps-simple-qr-contact-webapp",
 	"main": "src/entry.py",
 	"compatibility_date": "2025-11-02",
 	"compatibility_flags": [
@@ -36,10 +40,31 @@
 			"/api",
 			"/api/*"
 		]
-	}
-	// To serve this on apps.labor.maryland.dev, add the custom domain below and
-	// redeploy. Left commented so a deploy cannot claim the hostname by surprise.
-	// "routes": [
-	// 	{ "pattern": "apps.labor.maryland.dev", "custom_domain": true }
-	// ]
+	},
+	// One hostname serves both: the primary app on apps.labor.maryland.dev itself, and
+	// each Preview on <preview-name>.apps.labor.maryland.dev. Cloudflare creates
+	// the wildcard DNS record and an advanced certificate pack covering
+	// *.apps.labor.maryland.dev the first time a Preview is made.
+	//
+	// Both flags are stated rather than left to default. "enabled" defaults to
+	// production-and-preview when omitted, but spelling it out is what separates
+	// this from the preview-only shape (previews_enabled: true, enabled: false),
+	// and omitting previews_enabled risks a deploy resetting it to false.
+	"routes": [
+		{
+			"pattern": "apps.labor.maryland.dev",
+			"custom_domain": true,
+			"previews_enabled": true,
+			"enabled": true
+		}
+	],
+	// Already false on the deployed Worker, and stated here because otherwise a
+	// deploy turns it back on: wrangler re-enables the workers.dev route unless
+	// the config says not to. Previews arrive on the custom domain above, so the
+	// workers.dev hostname has no job here.
+	"workers_dev": false
+	// "preview_urls" is deliberately absent - it controls only the *workers.dev*
+	// preview hostname, which is off, and wrangler leaves the setting alone when
+	// the key is omitted. Custom-domain previews are the "previews_enabled" flag
+	// on the route above, not this.
 }
