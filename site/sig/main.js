@@ -1,18 +1,19 @@
 /*
  * Signature generator controller.
  *
- * Builds the signature preview and the contact QR code from the form, then
- * copies the preview as rich HTML so it can be pasted into Gmail or Outlook.
- *
- * The QR <img> deliberately points at an absolute URL on this origin. Mail
- * clients fetch signature images from their own network, so a relative path or
- * a data: URI would simply not render for the recipient.
+ * Builds the signature preview from the form and copies it as rich HTML so it
+ * can be pasted into Gmail or Outlook. The contact QR code is generated from
+ * the same fields but lives in its own section, deliberately outside the
+ * signature: a mail client would have to fetch it from this origin on every
+ * send, and recipients on other networks often would not see it at all.
  */
 
+/* 'suffix' is what the signature shows; 'param' is the API field, which decides
+ * the label the number arrives with on a phone. */
 const PHONE_TYPES = [
-	{ key: 'Mobile', suffix: '(M)' },
-	{ key: 'Office', suffix: '(O)' },
-	{ key: 'Fax', suffix: '(F)' },
+	{ key: 'Mobile', suffix: '(M)', param: 'mobile' },
+	{ key: 'Office', suffix: '(O)', param: 'office' },
+	{ key: 'Fax', suffix: '(F)', param: 'fax' },
 ];
 
 const PLACEHOLDERS = {
@@ -20,10 +21,14 @@ const PLACEHOLDERS = {
 	title: 'Job Title',
 	division: 'Division',
 	email: 'name@maryland.gov',
-	mobile: '555-555-5555 (M)',
+	mobile: '(555) 555-5555 (M)',
 };
 
-const ORG_NAME = 'Maryland Department of Labor';
+/* Long enough that a paused typist sees the code appear promptly, long enough
+ * that typing a name does not fire a request per keystroke. Without this the
+ * API was asked to render every prefix of the name, and a half-typed 'Jay'
+ * could still be the image on screen when the last request lost the race. */
+const QR_DEBOUNCE_MS = 350;
 
 const $ = (id) => document.getElementById(id);
 
@@ -37,30 +42,80 @@ function splitName(full) {
 	return { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1] };
 }
 
+/* '4105550100' -> '(410) 555-0100', formatting as far as the digits reach.
+ *
+ * Anything that is not a plain North American number - an international number,
+ * a number with an extension - is returned untouched rather than reshaped into
+ * something wrong. Same principle as normalize_phone() in src/mecard.py: a
+ * mangled number is worse than an unformatted one. */
+function formatPhone(raw) {
+	const digits = String(raw).replace(/\D/g, '');
+	if (digits.length > 11 || (digits.length === 11 && digits[0] !== '1')) return raw;
+
+	const local = digits.length === 11 ? digits.slice(1) : digits;
+	if (!local) return '';
+	// The parens appear only once there is a fourth digit, so backspacing out of
+	// a 3-digit area code does not fight a bracket the user cannot delete.
+	if (local.length <= 3) return local;
+	if (local.length <= 6) return `(${local.slice(0, 3)}) ${local.slice(3)}`;
+	return `(${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`;
+}
+
+/* Reformat in place, keeping the caret on the digit the user was editing.
+ * Without that, correcting a digit mid-number throws the caret to the end. */
+function reformatPhoneField(input) {
+	const before = input.value;
+	const formatted = formatPhone(before);
+	if (formatted === before) return;
+
+	const caret = input.selectionStart;
+	const atEnd = caret === before.length;
+	const digitsBefore = before.slice(0, caret).replace(/\D/g, '').length;
+
+	input.value = formatted;
+	if (atEnd) return;
+
+	let seen = 0;
+	let position = digitsBefore === 0 ? 0 : formatted.length;
+	for (let i = 0; i < formatted.length; i++) {
+		if (!/\d/.test(formatted[i])) continue;
+		seen += 1;
+		if (seen === digitsBefore) {
+			position = i + 1;
+			break;
+		}
+	}
+	input.setSelectionRange(position, position);
+}
+
 function phoneValue(type) {
 	return $('chk' + type).checked ? $('in' + type).value.trim() : '';
 }
 
-/* Absolute so the copied signature resolves from a mail client. */
+/* Absolute, so the download links and the <img> resolve the same way.
+ *
+ * vCard rather than MECARD: MECARD's TEL field carries no type, so a desk, a
+ * mobile and a fax number all arrive on the phone labelled 'phone'. vCard keeps
+ * the labels, at the cost of a denser code - which is why the QR is displayed
+ * at 300px, measured as the size all three numbers still decode at. */
 function qrUrl(format) {
 	const name = $('inName').value.trim();
 	const email = $('inEmail').value.trim();
-	const mobile = phoneValue('Mobile');
-	const office = phoneValue('Office');
+	const phones = PHONE_TYPES.map(({ key, param }) => [param, phoneValue(key)]).filter(([, v]) => v);
 
 	// Nothing identifying yet - the API would reject an empty card.
-	if (!name && !email && !mobile && !office) return null;
+	if (!name && !email && !phones.length) return null;
 
 	const { first, last } = splitName(name);
 	const params = new URLSearchParams();
 	if (first) params.set('first', first);
 	if (last) params.set('last', last);
-	if (mobile) params.set('mobile', mobile);
-	if (office) params.set('office', office);
+	for (const [param, value] of phones) params.set(param, value);
 	if (email) params.set('email', email);
-	if ($('chkQrOrg').checked) params.set('org', ORG_NAME);
 
-	return new URL(`/api/mecard.${format}?${params}`, location.origin).href;
+	// ORG is not passed: /api/vcard already defaults to the department, so the
+	// name lives in one place (src/entry.py) instead of two.
+	return new URL(`/api/vcard.${format}?${params}`, location.origin).href;
 }
 
 function togglePhone(type) {
@@ -84,24 +139,32 @@ function updateSig() {
 		$('out' + key).innerText = raw ? `${raw} ${suffix}` : fallback;
 	}
 
-	updateQr();
+	scheduleQr();
+}
+
+let qrTimer = 0;
+
+function scheduleQr() {
+	clearTimeout(qrTimer);
+	qrTimer = setTimeout(updateQr, QR_DEBOUNCE_MS);
 }
 
 function updateQr() {
-	const cell = $('outQrCell');
+	clearTimeout(qrTimer);
+
 	const img = $('outQr');
 	const png = qrUrl('png');
-	const wanted = $('chkQr').checked && png !== null;
 
-	cell.style.display = wanted ? 'table-cell' : 'none';
-	$('chkQrOrg').disabled = !$('chkQr').checked;
+	img.hidden = png === null;
+	$('qrEmpty').hidden = png !== null;
 
-	if (wanted) {
+	if (png) {
 		if (img.getAttribute('src') !== png) img.src = png;
 		const who = $('inName').value.trim();
 		img.alt = who ? `QR code with ${who}'s contact details` : 'QR code with this contact’s details';
 	} else {
 		img.removeAttribute('src');
+		img.alt = '';
 	}
 
 	const slug = ($('inName').value.trim() || 'contact').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -165,26 +228,39 @@ function init() {
 	$('sigForm').addEventListener('input', updateSig);
 
 	for (const { key } of PHONE_TYPES) {
+		const input = $('in' + key);
+
+		// Listeners on the input itself run before the form's bubbled handler, so
+		// the signature and the QR both read the already-formatted value.
+		// 'change' as well as 'input': some browsers autofill without firing 'input'.
+		const reformat = () => reformatPhoneField(input);
+		input.addEventListener('input', reformat);
+		input.addEventListener('change', reformat);
+
 		$('chk' + key).addEventListener('change', () => {
 			togglePhone(key);
 			updateQr();
 		});
 	}
 
-	$('chkQr').addEventListener('change', updateQr);
-	$('chkQrOrg').addEventListener('change', updateQr);
 	$('btnCopy').addEventListener('click', copySignature);
+
+	// A pending debounce would leave the code a keystroke behind at the moment
+	// someone reaches for it.
+	$('dlPng').addEventListener('click', updateQr);
+	$('dlSvg').addEventListener('click', updateQr);
 
 	$('outQr').addEventListener('error', () => {
 		flash('The QR code could not be generated - check the details above.');
 	});
 
-	if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
-		$('devNote').hidden = false;
+	for (const { key } of PHONE_TYPES) {
+		reformatPhoneField($('in' + key));
+		togglePhone(key);
 	}
 
-	for (const { key } of PHONE_TYPES) togglePhone(key);
 	updateSig();
+	updateQr();
 }
 
 init();
