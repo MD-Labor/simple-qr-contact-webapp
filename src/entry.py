@@ -40,6 +40,17 @@ LOGOS = {
 DEFAULT_LOGO = "md"
 MAX_DATA_LEN = 2000
 
+# PNG output is a bitmap, so its memory is the square of the image side - and
+# the caller sets both factors: 'data' and 'ec' decide the module count, 'box'
+# the pixels per module. The densest code this API will encode is 177 modules
+# plus an 8-module quiet zone, which at box=40 is 7400px - ~220MB of RGBA
+# pixels, more than the Worker isolate has, and Pillow holds two copies while
+# converting. Capping the side covers both factors at once. 2048px costs ~17MB,
+# prints cleanly at 300dpi, and still leaves the default box=10 usable for
+# every code that fits in MAX_DATA_LEN (185 x 10 = 1850px). SVG has no such
+# limit: it is text, and scales on the client.
+MAX_PNG_SIDE = 2048
+
 # Colour parameters are bounded and grammar-checked rather than passed through
 # verbatim: they end up inside generated documents, and an arbitrarily long
 # value is a cheap way to make the Worker build an enormous response. 64
@@ -191,6 +202,19 @@ def _render(data, params, fmt):
     except Exception as exc:
         raise ApiError(f"Could not encode that data: {exc}")
 
+    if fmt != "svg":
+        # get_matrix() already includes the quiet zone, and that is what Pillow
+        # rasterizes: the image is len(matrix) * box_size on each side.
+        span = len(qr.get_matrix())
+        side = span * box
+        if side > MAX_PNG_SIDE:
+            raise ApiError(
+                f"this code is {span} modules wide with its quiet zone, so "
+                f"'box' {box} would render it at {side}x{side} pixels; the "
+                f"limit is {MAX_PNG_SIDE}. Use box={max(1, MAX_PNG_SIDE // span)} "
+                "or lower, or ask for .svg, which scales to any size."
+            )
+
     # Verified by decoding real output: at scale 0.35 the logo swallows more
     # modules than error correction can rebuild and the code stops decoding
     # entirely. We still honour the request - the CLI does - but say so.
@@ -337,7 +361,9 @@ def _index():
                 "backing": "color behind the logo (default white); same "
                            "grammar as fg",
                 "square": "1 to force a square logo backing",
-                "box": "pixels per QR module, 1-40 (default 10)",
+                "box": "pixels per QR module, 1-40 (default 10); PNG output "
+                       f"is also capped at {MAX_PNG_SIDE}px on a side, so a "
+                       "dense code needs a smaller box or .svg",
             },
         }
     )
