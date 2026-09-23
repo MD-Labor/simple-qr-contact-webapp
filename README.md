@@ -22,7 +22,8 @@ site/                     static assets, served directly by Cloudflare
 src/                      the Worker (Python)
 ├── entry.py              router for /api/*
 ├── qrrender.py           shared render core (CLI + Worker)
-├── mecard.py             MECARD contact-card builder
+├── vcard.py              vCard 3.0 builder - labelled phone numbers
+├── mecard.py             MECARD builder - smaller, but no labels
 ├── maryland-logo.svg     bundled logo, vector, for SVG output
 └── maryland-logo.png     bundled logo, pre-rasterized, for PNG output
 
@@ -31,7 +32,14 @@ scripts/bake_logo.py      build step: input/*.svg -> src/maryland-logo.png
 tests/                    pytest suite for mecard.py and qrrender.py
 ```
 
-The signature page is plain HTML and JS — no framework, no build step. It sets an `<img>` `src` to `/api/mecard.png?...` and lets the Worker render the code. That matters because email clients fetch signature images from their own network: the URL the page builds is absolute, so the image still resolves once the signature is pasted into Gmail or Outlook.
+The signature page is plain HTML and JS — no framework, no build step. It sets an `<img>` `src` to `/api/mecard.png?...` and lets the Worker render the code.
+
+Two deliberate choices there:
+
+- **The QR code is not part of the signature.** It has its own section on the page, and the copy button copies only the signature table. A QR embedded in a signature has to be fetched from this origin on every send, and recipients on other networks frequently would not see it at all — so it's offered as a download instead.
+- **The QR request is debounced.** Without it, the API was asked to render every prefix of the name as it was typed, and a half-typed name could still be the image on screen when the final request lost the race.
+
+Phone fields format as you type — `4105550100` becomes `(410) 555-0100`. Anything that isn't a plain North American number (an international number, a number with an extension) is left exactly as entered rather than reshaped into something wrong.
 
 ## Setup
 
@@ -73,7 +81,7 @@ Then open <http://127.0.0.1:8787/sig>.
 
 ## API
 
-Three endpoints. The path extension (`.png` / `.svg`) is a courtesy for callers that want to pin a format; `?format=` does the same. The default is PNG, because that's what email clients can actually render inside a signature — Gmail and Outlook display neither inline SVG nor data-URI images there.
+Four endpoints. The path extension (`.png` / `.svg`) is a courtesy for callers that want to pin a format; `?format=` does the same. The default is PNG, because that's what email clients can actually render inside a signature — Gmail and Outlook display neither inline SVG nor data-URI images there.
 
 ### `GET /api/qr[.png|.svg]`
 
@@ -88,24 +96,32 @@ Encode any string.
 /api/qr.svg?data=WIFI%3AT%3AWPA%3BS%3AGuestNet%3BP%3Ahunter2%3B%3B&logo=none
 ```
 
-### `GET /api/mecard[.png|.svg]`
+### `GET /api/vcard[.png|.svg]` and `GET /api/mecard[.png|.svg]`
 
-Build a MECARD contact card and encode it. Every field is optional, but a card needs at least a name, phone number, or email.
+Build a contact card and encode it. Both take the same parameters. Every field is optional, but a card needs at least a name, phone number, or email.
+
+**Which one:** vCard labels each phone number, MECARD cannot. MECARD's `TEL` field takes no type parameter at all, so a card with a desk, a mobile and a fax number arrives on the phone as three identical "phone" entries. vCard emits `TEL;TYPE=CELL`, `TYPE=WORK,VOICE` and `TYPE=WORK,FAX`, which phones show as mobile, work and work fax.
+
+The cost is size. For the same contact with two numbers, vCard is roughly twice the payload — 221 bytes against 113 — because of `BEGIN`/`VERSION`/`END`, longer property names, and CRLF between every line. With three numbers that's 81 modules against 69, which is why the signature page displays its code at 300px. Use `/api/mecard` when the code has to stay small and the labels don't matter.
 
 | Parameter | Description |
 | --- | --- |
-| `first`, `last` | Given and family name. Encoded as `N:Last,First`. |
-| `mobile`, `office`, `tel` | Phone numbers, each emitted as its own `TEL:` field and normalized to E.164 where the digits allow it. |
+| `first`, `last` | Given and family name. |
+| `mobile` | Mobile number. vCard labels it `CELL`. |
+| `office`, `tel` | Work numbers. vCard labels them `WORK,VOICE`. |
+| `fax` | Fax number. vCard labels it `WORK,FAX`. |
+| `title` | Job title. **vCard only** — MECARD has no field for it. |
 | `email` | Email address. |
 | `url` | Website. Defaults to `https://labor.maryland.gov/`. |
-| `org` | Organization. **Omitted unless you set it** — see below. |
+| `org` | Organization. Defaults to `Maryland Department of Labor`; pass `org=none` to omit it. |
 | `note` | Free-text note. |
 
 ```
+/api/vcard.png?first=Jay&last=Huie&mobile=555-555-5555&fax=410-555-0101&email=jay.huie%40maryland.gov
 /api/mecard.png?first=Jay&last=Huie&mobile=555-555-5555&email=jay.huie%40maryland.gov
 ```
 
-`org` is off by default because it costs about 33 characters, which pushes a typical card from QR version 9 to version 11 — 61 modules to 69. At the ~150px a signature displays, that density starts to fail on phone cameras. Add `&org=Maryland+Department+of+Labor` only if you've tested the result.
+In MECARD the name is always emitted with both components — `N:Huie,Jay`, or `N:Huie,` when only a surname is known. A single-component `N:Huie` is ambiguous, and scanners resolve it as the *given* name, which saves the contact to a phone with the surname "Unknown". vCard has the same trap and the same fix: `N:Huie;Jay;;;` always carries its five components, and `FN` is always present because vCard 3.0 requires it.
 
 ### Shared options
 
@@ -115,7 +131,7 @@ Both image endpoints accept:
 | --- | --- | --- |
 | `format` | `png` or `svg`. A path extension wins over this. | `png` |
 | `logo` | `md` for the Maryland logo, or `none` for a bare code. | `md` |
-| `ec` | Error correction: `L`, `M`, `Q`, `H`. | `H` with a logo, else `M` |
+| `ec` | Error correction: `L`, `M`, `Q`, `H`. | `Q` with a logo, else `M` |
 | `scale` | Logo size as a fraction of the QR width. | `0.22` |
 | `fg` / `color` | Foreground color. | `black` |
 | `bg` | Background color, or `transparent`. | `white` |
@@ -124,6 +140,8 @@ Both image endpoints accept:
 | `box` | Pixels per QR module, 1–40. | `10` |
 
 Above `scale=0.28` the response carries an `X-QR-Warning` header: the request is still honored, but the code may not decode. This isn't theoretical — decoding real output back with OpenCV, `scale=0.35` fails outright while `0.22` and `0.26` round-trip cleanly.
+
+The `Q` default for logo'd codes is measured, not guessed. The CLI defaults a logo'd code to `H`, which is right for print at arbitrary size, but `H` reserves a 30% damage budget for a logo that covers under 6% of the code. On a name + two phones + organization card, `H` produces 73 modules and stops decoding below about 240px, while `Q` produces 65 and decodes from 160px up — still roughly four times the headroom the logo needs. Pass `ec=H` explicitly if the code is going to print.
 
 ### `GET /api`
 
