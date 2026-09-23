@@ -153,17 +153,24 @@ a:focus-visible {
 	display: none;
 }
 
-.downloads {
-	margin-top: 25px;
+.qr-box {
+	border: 1px dashed #ccc;
+	padding: 20px;
+	margin-top: 12px;
+	text-align: center;
+}
+
+.qr-box img {
+	display: block;
+	margin: 0 auto;
+}
+
+.qr-links {
 	font-size: 14px;
+	margin-bottom: 0;
 }
 
-.downloads summary {
-	cursor: pointer;
-	color: #1155cc;
-}
-
-.downloads a[aria-disabled='true'] {
+.qr-links a[aria-disabled='true'] {
 	color: #767676;
 	pointer-events: none;
 	text-decoration: none;
