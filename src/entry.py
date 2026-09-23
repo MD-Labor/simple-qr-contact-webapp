@@ -3,8 +3,12 @@
 Routes (everything else is served from site/ by the static assets binding):
 
     GET /api/qr[.png|.svg]      encode any string          ?data=<text>
+    GET /api/vcard[.png|.svg]   build + encode a vCard     ?first=&last=&...
     GET /api/mecard[.png|.svg]  build + encode a MECARD    ?first=&last=&...
     GET /api                    endpoint reference (JSON)
+
+vCard and MECARD take the same parameters. vCard labels each phone number;
+MECARD is smaller but cannot. See src/vcard.py for the tradeoff.
 
 The extension is a courtesy for callers that want to pin a format; ?format=
 does the same thing, and the default is PNG because that is what email clients
@@ -18,6 +22,7 @@ from workers import Response, WorkerEntrypoint
 
 import mecard
 import qrrender
+import vcard
 
 # Bundled logo assets must sit directly beside this file: pywrangler only ships
 # files in the entrypoint's own directory, so a subdirectory would be missing at
@@ -34,8 +39,26 @@ LOGOS = {
 DEFAULT_LOGO = "md"
 MAX_DATA_LEN = 2000
 
+# Error correction for a logo'd code. qrrender defaults to H, which is right for
+# the CLI (print, arbitrary size) but spends modules this API cannot afford: a
+# logo at the default 0.22 scale covers under 6% of the code, while H reserves
+# 30%. Measured on a name + two phones + org card, H yields 73 modules and stops
+# decoding below ~240px; Q yields 65 and decodes cleanly from 160px up, still
+# leaving about four times the headroom the logo actually needs.
+LOGO_ERROR_LEVEL = "Q"
+
 ORG_NAME = "Maryland Department of Labor"
 ORG_URL = "https://labor.maryland.gov/"
+
+# Phone query parameters, in the order they should appear on a card, mapped to
+# the kind of number each one means. vCard turns these into TYPE labels; MECARD
+# discards them, having no field to put a label in.
+PHONE_FIELDS = (
+    ("mobile", "cell"),
+    ("office", "work"),
+    ("fax", "fax"),
+    ("tel", "work"),
+)
 
 CACHE_CONTROL = "public, max-age=86400"
 
@@ -107,7 +130,7 @@ def _render(data, params, fmt):
 
     level_name = (_one(params, "ec", "") or "").upper()
     if not level_name:
-        level_name = qrrender.default_error_level(logo is not None)
+        level_name = LOGO_ERROR_LEVEL if logo is not None else qrrender.default_error_level(False)
     if level_name not in qrrender.ERROR_LEVELS:
         raise ApiError(
             f"'ec' must be one of L, M, Q, H - got {level_name!r}."
@@ -155,12 +178,13 @@ def _render(data, params, fmt):
     return Response(to_js(png).buffer, headers=headers)
 
 
-def _mecard_from_params(params):
+def _card_from_params(params, kind):
+    """Build a MECARD or vCard payload from the shared contact parameters."""
     phones = []
-    for key in ("mobile", "office", "tel"):
+    for key, phone_kind in PHONE_FIELDS:
         value = _one(params, key)
         if value:
-            phones.append(value)
+            phones.append((phone_kind, value))
 
     first = _one(params, "first", "") or ""
     last = _one(params, "last", "") or ""
@@ -172,22 +196,33 @@ def _mecard_from_params(params):
     if not (first or last or email or phones):
         raise ApiError(
             "A contact card needs at least a name, phone number, or email. "
-            "Example: /api/mecard.png?first=Jay&last=Huie&email=jay.huie@maryland.gov"
+            f"Example: /api/{kind}.png?first=Jay&last=Huie&email=jay.huie@maryland.gov"
         )
 
+    # ORG defaults on, matching URL: this is the department's own API, so a card
+    # it builds says where the person works. Pass org=none to leave it out. It
+    # costs ~33 characters, which pushes a typical card from QR version 9 to 11
+    # (61 -> 69 modules) - worth knowing if you shrink the code below ~180px.
+    org = _one(params, "org", ORG_NAME) or ""
+    if org.lower() in ("none", "off", "no"):
+        org = ""
+
+    fields = dict(
+        first=first,
+        last=last,
+        email=email,
+        url=_one(params, "url", ORG_URL) or "",
+        org=org,
+        note=_one(params, "note", "") or "",
+    )
+
     try:
-        return mecard.build(
-            first=first,
-            last=last,
-            phones=phones,
-            email=email,
-            url=_one(params, "url", ORG_URL) or "",
-            # ORG is off by default on purpose: it adds ~33 characters, which
-            # pushes a typical card from QR version 9 to 11 (61 -> 69 modules).
-            # At the ~150px a signature displays, that density starts to fail.
-            org=_one(params, "org", "") or "",
-            note=_one(params, "note", "") or "",
-        )
+        if kind == "vcard":
+            return vcard.build(
+                phones=phones, title=_one(params, "title", "") or "", **fields
+            )
+        # MECARD has no way to label a number, so only the numbers survive.
+        return mecard.build(phones=[number for _, number in phones], **fields)
     except ValueError as exc:
         raise ApiError(str(exc))
 
@@ -212,17 +247,29 @@ def _index():
                     "description": "Encode any string as a QR code.",
                     "required": {"data": "text to encode"},
                 },
+                "GET /api/vcard[.png|.svg]": {
+                    "description": "Build a vCard 3.0 contact card and encode it. "
+                                   "Unlike MECARD, each number keeps its label "
+                                   "(mobile, work, work fax) - at roughly twice "
+                                   "the payload, so a denser code.",
+                    "optional": {
+                        "same as /api/mecard, plus": "title (job title)",
+                    },
+                },
                 "GET /api/mecard[.png|.svg]": {
-                    "description": "Build a MECARD contact card and encode it.",
+                    "description": "Build a MECARD contact card and encode it. "
+                                   "More compact than vCard, but every number "
+                                   "arrives unlabelled as 'phone'.",
                     "optional": {
                         "first": "given name",
                         "last": "family name",
                         "mobile": "mobile number",
                         "office": "office number",
+                        "fax": "fax number",
                         "tel": "additional number",
                         "email": "email address",
-                        "org": f"organization, omitted unless set (e.g. {ORG_NAME}); "
-                               "adds ~33 characters and a denser code",
+                        "org": f"organization (default: {ORG_NAME}); "
+                               "'none' omits it, for a shorter, less dense code",
                         "url": f"website (default: {ORG_URL})",
                         "note": "free-text note",
                     },
@@ -231,7 +278,7 @@ def _index():
             "shared_options": {
                 "format": "png (default) or svg; the path extension wins",
                 "logo": f"{DEFAULT_LOGO} (default) or none",
-                "ec": "error correction L, M, Q, H (default H with a logo, else M)",
+                "ec": f"error correction L, M, Q, H (default {LOGO_ERROR_LEVEL} with a logo, else M)",
                 "scale": f"logo size as a fraction of width (default {qrrender.DEFAULT_LOGO_SCALE}; "
                          f"above {qrrender.MAX_SAFE_LOGO_SCALE} often stops scanning)",
                 "fg": "foreground color (default black)",
@@ -270,8 +317,8 @@ class Default(WorkerEntrypoint):
                     raise ApiError("'data' is required. Example: /api/qr.svg?data=hello")
                 return _render(data, params, fmt)
 
-            if route == "mecard":
-                return _render(_mecard_from_params(params), params, fmt)
+            if route in ("mecard", "vcard"):
+                return _render(_card_from_params(params, route), params, fmt)
 
             raise ApiError(f"No such endpoint: {path}", status=404)
 
