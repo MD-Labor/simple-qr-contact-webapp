@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Maryland Department of Labor - Internal Applications</title>
+	<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+	<link rel="stylesheet" href="/css/site.css">
+</head>
+<body>
+	<div class="container">
+		<h1>Maryland Department of Labor &mdash; Internal Applications</h1>
+
+		<h2>Applications</h2>
+		<ul>
+			<li><a href="/sig">Email Signature Generator</a> &mdash; build your signature and a contact QR code.</li>
+		</ul>
+
+		<h2>API</h2>
+		<p>The QR generator is a general-purpose endpoint &mdash; it encodes any string, not just contact cards.</p>
+		<ul>
+			<li><code>GET /api/qr.png?data=hello</code> &mdash; encode any text.</li>
+			<li><code>GET /api/qr.svg?data=https://maryland.gov</code> &mdash; vector output for print.</li>
+			<li><code>GET /api/mecard.png?first=Jay&amp;last=Huie&amp;email=jay.huie@maryland.gov</code> &mdash; build and encode a contact card.</li>
+			<li><a href="/api"><code>GET /api</code></a> &mdash; full parameter reference.</li>
+		</ul>
+	</div>
+</body>
+</html>
