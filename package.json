@@ -5,6 +5,7 @@
 	"scripts": {
 		"dev": "uv run pywrangler dev",
 		"start": "uv run pywrangler dev",
+		"build": "uv run pytest -q && uv run pywrangler sync",
 		"deploy": "uv run pywrangler deploy",
 		"bake-logo": "uv run --with resvg-py --with pillow python scripts/bake_logo.py",
 		"test": "uv run pytest -q"

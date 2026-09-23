@@ -68,6 +68,7 @@ On Debian/Ubuntu: `sudo apt install libcairo2`. macOS ships Cairo. On Windows th
 ```bash
 npm run dev               # uv run pywrangler dev  -> http://127.0.0.1:8787
 npm test                  # uv run pytest -q
+npm run build             # uv run pytest -q && uv run pywrangler sync
 npm run deploy            # uv run pywrangler deploy
 ```
 
@@ -75,9 +76,47 @@ Then open <http://127.0.0.1:8787/sig>.
 
 `pywrangler` refuses to start if a `requirements.txt` exists in the project root — dependencies live in `pyproject.toml`. It also requires reasonably current toolchains (uv ≥ 0.12.3, wrangler ≥ 4.127.1); `uv self update` and `npm install` cover that.
 
-### Deploying to a hostname
+### The Worker name
 
-`wrangler.jsonc` has the `routes` block for `apps.labor.maryland.dev` **commented out** on purpose, so a deploy can't claim the hostname unintentionally. Uncomment it and redeploy when you want the custom domain.
+`wrangler.jsonc` sets `name` to **`intranet-apps-simple-qr-contact-webapp`** — the Worker that owns the hostname and the Access policy — not `simple-qr-contact-webapp`, which is only what this repository is called. Wrangler deploys by that field, so a mismatch doesn't error: it creates a second, bare Worker under the repo's name and leaves the real one serving the old code. Rename the Worker and this field together, never one alone.
+
+### The hostname
+
+One custom domain serves both production and previews:
+
+| | Hostname |
+| --- | --- |
+| Production | `apps.labor.maryland.dev` |
+| Preview (latest on a branch) | `<preview-name>.apps.labor.maryland.dev` |
+| A specific deploy | `<deployment-id>-<preview-name>.apps.labor.maryland.dev` |
+
+That's the `previews_enabled: true` + `enabled: true` pair on the route. Cloudflare creates the `*.apps.labor.maryland.dev` wildcard DNS record and an advanced certificate pack covering it the first time a Preview exists — no Total TLS or manual certificate needed at this subdomain depth, though issuance isn't instant.
+
+`workers_dev: false` is stated rather than assumed, because Wrangler *re-enables* the `workers.dev` route on deploy unless the config says not to — disabling it in the dashboard alone doesn't stick. `preview_urls` is deliberately absent: it governs only the `workers.dev` preview hostname (off here), and Wrangler leaves that setting alone when the key is omitted. Custom-domain previews are the route's `previews_enabled` flag, not this key — easy to conflate.
+
+### Behind Cloudflare Access
+
+Access is applied at the **Worker** level rather than bound to a single hostname, which covers the custom domain, its preview subdomains and `workers.dev` in one policy. It gates `/api/*` as well as the pages. Three consequences:
+
+- **The page still works.** `<img src="/api/vcard.png?...">` is same-origin, so the browser sends the Access cookie with it, and so do the download links.
+- **Scanning still works, for now.** The QR encodes a vCard — the payload *is* the contact data, and a phone reading it never contacts this origin. That stops being true the moment someone generates a code whose data is a URL back here: phones would scan their way to a login page. Use `/api/qr?data=` with an off-origin URL for anything meant to be scanned by the public.
+- **Preview hostnames are only as protected as the policy's scope.** Worker-level Access covers them; a policy bound to the literal hostname `apps.labor.maryland.dev` would not. After changing Access, load a preview URL in a private window and confirm it prompts for sign-in.
+
+### Continuous deployment (Workers Builds)
+
+Connecting the repo to a Worker in the Cloudflare dashboard needs these build settings:
+
+| Setting | Value |
+| --- | --- |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` (the default) |
+| Preview command | `npx wrangler preview` (the default) |
+
+**The build command is not optional here, and getting it wrong fails quietly.** Python dependencies are vendored into `python_modules/`, which Wrangler bundles automatically but never creates — `pywrangler sync` does, and `python_modules/` is gitignored, so a fresh CI checkout doesn't have one. With no build command, `wrangler deploy` uploads a Worker with no `qrcode` and no Pillow: the build goes green, the static pages serve fine, and every `/api/*` request returns a 500 with `ModuleNotFoundError` in the logs.
+
+`npm run build` also runs the test suite first (about half a second), so a broken card builder can't reach the hostname.
+
+`uv` is preinstalled in the build image and runs `uv sync` on its own once it sees `uv.lock`, which is why `npm run build` can call `uv run` directly.
 
 ## API
 
