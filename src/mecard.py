@@ -90,11 +90,13 @@ def build(
     fields: list[str] = []
 
     # MECARD orders the name as Last,First - reversed from how it is displayed.
+    #
+    # Both components are always emitted, comma included, even when one of them
+    # is empty. A single-component 'N:Huie' is ambiguous, and scanners resolve
+    # it as the *given* name: a surname-only card saved to a phone as first name
+    # 'Huie', surname 'Unknown'. 'N:Huie,' says which component is which.
     if last or first:
-        name = escape_name_part(last)
-        if first:
-            name = f"{name},{escape_name_part(first)}"
-        fields.append(f"N:{name}")
+        fields.append(f"N:{escape_name_part(last)},{escape_name_part(first)}")
 
     for phone in phones or []:
         number = normalize_phone(phone) if normalize_phones else phone
