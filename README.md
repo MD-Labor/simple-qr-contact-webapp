@@ -133,9 +133,9 @@ Both image endpoints accept:
 | `logo` | `md` for the Maryland logo, or `none` for a bare code. | `md` |
 | `ec` | Error correction: `L`, `M`, `Q`, `H`. | `Q` with a logo, else `M` |
 | `scale` | Logo size as a fraction of the QR width. | `0.22` |
-| `fg` / `color` | Foreground color. | `black` |
-| `bg` | Background color, or `transparent`. | `white` |
-| `backing` | Solid color drawn behind the logo. | `white` |
+| `fg` / `color` | Foreground color. Name, hex, or `rgb()`/`hsl()`; 64 characters max. | `black` |
+| `bg` | Background color, or `transparent`. Same grammar as `fg`. | `white` |
+| `backing` | Solid color drawn behind the logo. Same grammar as `fg`. | `white` |
 | `square` | `1` to force a square logo backing. | off |
 | `box` | Pixels per QR module, 1–40. | `10` |
 
@@ -295,7 +295,9 @@ Higher error correction means more modules, so the code becomes denser at the sa
 
 ## Colors
 
-Colors accept anything Pillow accepts for raster output (CSS named colors, `#rgb`, `#rrggbb`) and anything valid as an SVG `fill` attribute for SVG output. In practice, named colors and 6-digit hex codes work in both.
+The CLI passes colors straight through: anything Pillow accepts for raster output (CSS named colors, `#rgb`, `#rrggbb`) and anything valid as an SVG `fill` attribute for SVG output. In practice, named colors and 6-digit hex codes work in both.
+
+The API is stricter, because its colors come from the query string of an anonymous request: `fg` / `color`, `bg`, and `backing` must be a color name, a `#rgb` / `#rgba` / `#rrggbb` / `#rrggbbaa` hex code, or an `rgb()` / `rgba()` / `hsl()` / `hsla()` value, and at most 64 characters. Anything else is a `400`.
 
 Keep contrast high. Very light foreground or very dark background will make the code hard to scan — aim for at least a 4.5:1 contrast ratio between foreground and background.
 

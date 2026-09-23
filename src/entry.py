@@ -14,6 +14,7 @@ The extension is a courtesy for callers that want to pin a format; ?format=
 does the same thing, and the default is PNG because that is what email clients
 can actually render inside a signature.
 """
+import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -38,6 +39,28 @@ LOGOS = {
 
 DEFAULT_LOGO = "md"
 MAX_DATA_LEN = 2000
+
+# Colour parameters are bounded and grammar-checked rather than passed through
+# verbatim: they end up inside generated documents, and an arbitrarily long
+# value is a cheap way to make the Worker build an enormous response. 64
+# characters clears every form the grammar below allows, with room to spare.
+MAX_COLOR_LEN = 64
+
+# Named colour (including 'transparent'/'none'), #rgb/#rgba/#rrggbb/#rrggbbaa,
+# or an rgb()/rgba()/hsl()/hsla() value. The functional forms allow only
+# digits, letters, and the separators CSS uses there - no XML metacharacters
+# can survive this, which keeps the escaping in qrrender a second line of
+# defence rather than the only one.
+COLOR_RE = re.compile(
+    r"""
+    ^(?:
+        [A-Za-z]{1,32}
+      | \#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})
+      | (?:rgb|rgba|hsl|hsla)\([0-9A-Za-z.,%/+\s-]{1,40}\)
+    )$
+    """,
+    re.VERBOSE,
+)
 
 # Error correction for a logo'd code. qrrender defaults to H, which is right for
 # the CLI (print, arbitrary size) but spends modules this API cannot afford: a
@@ -108,6 +131,21 @@ def _int(params, key, default, minimum, maximum):
     return number
 
 
+def _check_color(key, value):
+    """Reject colours that are too long or not a colour at all."""
+    if len(value) > MAX_COLOR_LEN:
+        # Deliberately does not echo the value back.
+        raise ApiError(
+            f"'{key}' is {len(value)} characters; the limit is {MAX_COLOR_LEN}."
+        )
+    if not COLOR_RE.match(value):
+        raise ApiError(
+            f"'{key}' must be a color name, a #rgb/#rrggbb hex code, or an "
+            f"rgb()/hsl() value - got {value!r}."
+        )
+    return value
+
+
 def _resolve_logo(params, fmt):
     """Return the logo file for this output format, or None for a bare code."""
     name = (_one(params, "logo", DEFAULT_LOGO) or "").lower()
@@ -140,9 +178,9 @@ def _render(data, params, fmt):
     if logo is not None and not 0.0 < logo_scale < 1.0:
         raise ApiError(f"'scale' must be greater than 0 and less than 1, got {logo_scale}.")
 
-    fg = _one(params, "fg") or _one(params, "color", "black")
-    bg = _one(params, "bg", "white")
-    backing = _one(params, "backing", "white")
+    fg = _check_color("fg", _one(params, "fg") or _one(params, "color", "black"))
+    bg = _check_color("bg", _one(params, "bg", "white"))
+    backing = _check_color("backing", _one(params, "backing", "white"))
     square = _flag(params, "square")
     box = _int(params, "box", 10, 1, 40)
 
@@ -281,9 +319,13 @@ def _index():
                 "ec": f"error correction L, M, Q, H (default {LOGO_ERROR_LEVEL} with a logo, else M)",
                 "scale": f"logo size as a fraction of width (default {qrrender.DEFAULT_LOGO_SCALE}; "
                          f"above {qrrender.MAX_SAFE_LOGO_SCALE} often stops scanning)",
-                "fg": "foreground color (default black)",
-                "bg": "background color, or 'transparent' (default white)",
-                "backing": "color behind the logo (default white)",
+                "fg": "foreground color (default black); a color name, "
+                      "#rgb/#rrggbb hex, or an rgb()/hsl() value, at most "
+                      f"{MAX_COLOR_LEN} characters",
+                "bg": "background color, or 'transparent' (default white); "
+                      "same grammar as fg",
+                "backing": "color behind the logo (default white); same "
+                           "grammar as fg",
                 "square": "1 to force a square logo backing",
                 "box": "pixels per QR module, 1-40 (default 10)",
             },

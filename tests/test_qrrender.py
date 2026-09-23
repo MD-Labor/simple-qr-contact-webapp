@@ -86,6 +86,38 @@ class TestRenderSvg:
         svg = qrrender.render_svg(build(), "black", "white", LOGO_PNG, 0.22, "white", False)
         assert "data:image/png;base64," in svg
 
+    def test_the_foreground_color_is_emitted_once_not_per_module(self):
+        """Per-module fills would scale the document with len(fg) x modules."""
+        color = "#" + "a" * 6
+        svg = qrrender.render_svg(build(), color, "white", None, 0.22, "white", False)
+        assert svg.count(color) == 1
+        assert f'<g fill="{color}">' in svg
+
+    def test_a_long_foreground_color_does_not_inflate_the_document(self):
+        qr = build()
+        short = qrrender.render_svg(qr, "black", "white", None, 0.22, "white", False)
+        long = qrrender.render_svg(qr, "b" * 4000, "white", None, 0.22, "white", False)
+        assert len(long) - len(short) < 4100
+
+    def test_modules_inherit_the_group_fill(self):
+        qr = build()
+        svg = qrrender.render_svg(qr, "navy", "white", None, 0.22, "white", False)
+        root = ET.fromstring(svg)
+        group = root.find("{http://www.w3.org/2000/svg}g")
+        assert group is not None and group.get("fill") == "navy"
+        dark = sum(sum(1 for cell in row if cell) for row in qr.get_matrix())
+        rects = group.findall("{http://www.w3.org/2000/svg}rect")
+        assert len(rects) == dark
+        assert all(rect.get("fill") is None for rect in rects)
+
+    def test_the_logo_is_not_inside_the_foreground_group(self):
+        """Inheriting the module colour would repaint the logo."""
+        svg = qrrender.render_svg(build(), "navy", "white", LOGO_SVG, 0.22, "white", False)
+        root = ET.fromstring(svg)
+        group = root.find("{http://www.w3.org/2000/svg}g")
+        assert group.find("{http://www.w3.org/2000/svg}svg") is None
+        assert root.find("{http://www.w3.org/2000/svg}svg") is not None
+
     def test_colors_are_xml_escaped(self):
         svg = qrrender.render_svg(build(), 'black"/><script>', "white", None, 0.22, "white", False)
         ET.fromstring(svg)
