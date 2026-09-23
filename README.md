@@ -176,7 +176,9 @@ Both image endpoints accept:
 | `bg` | Background color, or `transparent`. | `white` |
 | `backing` | Solid color drawn behind the logo. | `white` |
 | `square` | `1` to force a square logo backing. | off |
-| `box` | Pixels per QR module, 1–40. | `10` |
+| `box` | Pixels per QR module, 1–40. PNG output is additionally capped at 2048px on a side. | `10` |
+
+PNG is a bitmap, so its cost is the square of the image: the densest code this API encodes (2000 characters at `ec=H`, 185 modules with the quiet zone) would be 7400×7400 at `box=40`, about 220MB of pixels — more than a Worker isolate has. A PNG request over 2048px on a side is refused with a `400` naming the largest `box` that fits, so a dense code tops out around `box=11` while a short one still takes `box=40`. The default `box=10` always fits. SVG has no such limit: it is text, and the client scales it.
 
 Above `scale=0.28` the response carries an `X-QR-Warning` header: the request is still honored, but the code may not decode. This isn't theoretical — decoding real output back with OpenCV, `scale=0.35` fails outright while `0.22` and `0.26` round-trip cleanly.
 
