@@ -39,7 +39,9 @@ Two deliberate choices there:
 - **The QR code is not part of the signature.** It has its own section on the page, and the copy button copies only the signature table. A QR embedded in a signature has to be fetched from this origin on every send, and recipients on other networks frequently would not see it at all — so it's offered as a download instead.
 - **The QR request is debounced.** Without it, the API was asked to render every prefix of the name as it was typed, and a half-typed name could still be the image on screen when the final request lost the race.
 
-Phone fields format as you type — `4105550100` becomes `(410) 555-0100`. Anything that isn't a plain North American number (an international number, a number with an extension) is left exactly as entered rather than reshaped into something wrong.
+Phone fields format as you type — `4105550100` becomes `(410) 555-0100` — and hold **ten digits, no more**. Digits past the tenth are dropped as they're typed, and the only characters that survive are digits and the `()-` and space the formatter inserts itself. A leading country-code `1` is absorbed rather than counted, so pasting `+1 410 555 0100` still lands correctly.
+
+Ten digits is a deliberate narrowing, not a limitation to work around: every number this form collects is US, and an unbounded field accepted `(555) 555-5555555555` as a valid-looking entry. The cost is that a pasted international number is reshaped into a wrong US number instead of being left intact, and an extension (`555-0100 x3`) is dropped. Distinguishing the two would mean accepting `+`, which reopens the same hole. If a non-US number is ever genuinely needed, call `/api/vcard` directly — the API normalizes but does not restrict.
 
 ## Setup
 
