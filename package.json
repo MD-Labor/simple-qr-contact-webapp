@@ -1,0 +1,15 @@
+{
+	"name": "simple-qr-contact-webapp",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"dev": "uv run pywrangler dev",
+		"start": "uv run pywrangler dev",
+		"deploy": "uv run pywrangler deploy",
+		"bake-logo": "uv run --with resvg-py --with pillow python scripts/bake_logo.py",
+		"test": "uv run pytest -q"
+	},
+	"devDependencies": {
+		"wrangler": "^4.137.0"
+	}
+}
