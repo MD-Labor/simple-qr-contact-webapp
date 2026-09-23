@@ -1,0 +1,5 @@
+/*
+	The only stylesheet. Served verbatim from site/public/ at /css/site.css.
+	Layer project styles on top of the MDWDS classes loaded in partials/head.html;
+	do not add a CSS build step.
+*/

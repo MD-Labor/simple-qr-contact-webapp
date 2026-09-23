@@ -1,0 +1,5 @@
+* text=auto
+
+# Shell scripts must check out with LF even on Windows — bash fails on the CR
+# ("$'\r': command not found"), and scripts/deploy.sh is run via `npm run deploy`.
+*.sh text eol=lf

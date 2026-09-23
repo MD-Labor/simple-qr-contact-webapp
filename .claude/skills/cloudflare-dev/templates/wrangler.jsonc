@@ -1,0 +1,22 @@
+{
+	"name": "app",
+	"main": "src/index.js",
+	"compatibility_date": "2026-09-01",
+	"assets": {
+		// No "directory" — the Vite plugin points this at the build output for us.
+		"binding": "ASSETS",
+		"not_found_handling": "404-page", // serves site/404.html
+		// Only /api/* reaches the Worker; every other path is answered by a static asset first.
+		// Default html_handling ("auto-trailing-slash") means site/example/apprentice/index.html
+		// serves at /example/apprentice — clean URLs with no routing code.
+		"run_worker_first": ["/api/*"]
+	}
+
+	// Add a custom domain when the API needs a stable hostname, e.g.:
+	// "env": {
+	//   "test": {
+	//     "name": "app",
+	//     "routes": [{ "pattern": "licensing.labor.maryland.dev", "zone_name": "labor.maryland.dev", "custom_domain": true }]
+	//   }
+	// }
+}

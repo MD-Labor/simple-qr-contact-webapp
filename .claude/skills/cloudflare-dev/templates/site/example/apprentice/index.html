@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<!-- @include partials/head.html -->
+	<title>Apprentice application — Example Board</title>
+</head>
+<body>
+	<!-- @include partials/header.html -->
+	<main>
+		<!-- The page keeps one stable <h1>; each step contributes an <h2> inside #app. -->
+		<h1>Apply for an Apprentice license</h1>
+		<!-- data-license-type is all that distinguishes this page: the board's main.js reads it
+		     to pick the step list, and it rides along on every API payload. -->
+		<div id="app" data-board="example" data-license-type="apprentice"></div>
+	</main>
+	<!-- @include partials/footer.html -->
+	<script type="module" src="/example/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<!--
+	The route to licensure. `name="route"` is what main.js branches the eligibility step on.
+	Radios need a fieldset/legend to be announced as one group; the legend wording stays
+	distinct from the <h2> so it is not read out twice.
+-->
+<h2>Route to licensure</h2>
+<form>
+	<fieldset>
+		<legend>How do you want to qualify?</legend>
+		<label><input type="radio" name="route" value="examination" required> By examination</label>
+		<label><input type="radio" name="route" value="local-reciprocity"> By local reciprocity</label>
+		<label><input type="radio" name="route" value="state-reciprocity"> By state reciprocity</label>
+	</fieldset>
+	<button type="button" data-back>Back</button>
+	<button>Next</button>
+</form>

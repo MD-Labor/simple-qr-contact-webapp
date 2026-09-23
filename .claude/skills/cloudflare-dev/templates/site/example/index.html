@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<!-- @include partials/head.html -->
+	<title>Example Board — apply for a license</title>
+</head>
+<body>
+	<!-- @include partials/header.html -->
+	<main>
+		<h1>Apply for an Example license</h1>
+		<p>Choose the license type you need.</p>
+
+		<!--
+			Front door: a plain page, no step machinery. One link per license type, each a real
+			URL an applicant can bookmark and the Board can link to from elsewhere.
+		-->
+		<ul class="license-grid">
+			<li>
+				<h2><a href="/example/apprentice/">Apprentice</a></h2>
+				<p>You are new to the trade and will work under a licensed master.</p>
+			</li>
+			<li>
+				<h2><a href="/example/journeyperson/">Journeyperson</a></h2>
+				<p>You have completed your apprenticeship, or hold a license in another state.</p>
+			</li>
+		</ul>
+	</main>
+	<!-- @include partials/footer.html -->
+</body>
+</html>

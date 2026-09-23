@@ -1,0 +1,9 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/css/site.css">
+<!--
+	render=explicit because the login form is injected by steps.js after this script has
+	loaded. Turnstile's implicit scan only runs once, over the markup already in the page,
+	so js/login.js renders the widget itself. Link the MDWDS stylesheet here too.
+-->
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
