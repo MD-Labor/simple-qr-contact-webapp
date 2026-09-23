@@ -168,7 +168,9 @@ venv.bak/
 .ropeproject
 
 # mkdocs documentation
-/site
+#   NOT ignored here: /site is this project's static front end (see site/sig/),
+#   and the stock "/site" rule silently excluded the whole web app from commits.
+# /site
 
 # mypy
 .mypy_cache/
@@ -219,3 +221,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Cloudflare Workers
+node_modules/
+.wrangler/
+#   pywrangler's Pyodide venv and the vendored wheels it unpacks for the bundle
+.venv-workers/
+python_modules/
+
+# Local scratch output from manual QR checks
+.qrtest/
+out-test.*
