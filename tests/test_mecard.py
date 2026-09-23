@@ -70,8 +70,19 @@ class TestBuild:
     def test_name_is_ordered_last_then_first(self):
         assert "N:Huie,Jay;" in mecard.build(first="Jay", last="Huie")
 
-    def test_surname_only_omits_the_comma(self):
-        assert "N:Huie;" in mecard.build(last="Huie")
+    def test_surname_only_still_emits_the_comma(self):
+        """'N:Huie' would be read as a *given* name, surname 'Unknown'."""
+        assert "N:Huie,;" in mecard.build(last="Huie")
+
+    def test_given_name_only_emits_an_empty_surname_component(self):
+        assert "N:,Jay;" in mecard.build(first="Jay")
+
+    @pytest.mark.parametrize(
+        "kwargs", [{"last": "Huie"}, {"first": "Jay"}, {"first": "Jay", "last": "Huie"}]
+    )
+    def test_the_name_always_has_both_components(self, kwargs):
+        name = mecard.build(**kwargs).split("N:", 1)[1].split(";", 1)[0]
+        assert name.count(",") == 1
 
     def test_empty_fields_are_omitted_entirely(self):
         out = mecard.build(last="Huie", email="", url="", org="")
