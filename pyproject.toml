@@ -1,0 +1,30 @@
+[project]
+name = "simple-qr-contact-webapp"
+version = "0.1.0"
+description = "Maryland Department of Labor email signature generator with QR contact codes, on a Python Cloudflare Worker"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Pure Python, so it runs on Workers. We only use it to build the module
+    # matrix; rendering is ours.
+    "qrcode==8.2",
+    # Ships in Pyodide, used for PNG output.
+    "pillow",
+]
+
+[project.optional-dependencies]
+# CLI only, and only to put an *SVG* logo on *raster* output. Needs a system
+# libcairo, and cannot run on Workers - which is why the Worker ships a
+# pre-rasterized logo instead. Install with: uv sync --extra svg-logo
+svg-logo = [
+    "cairosvg==2.9.0",
+]
+
+[dependency-groups]
+dev = [
+    "workers-py",
+    "workers-runtime-sdk",
+    # SVG -> PNG for scripts/bake_logo.py only. Never imported by the Worker.
+    "resvg-py",
+    "pytest",
+]
