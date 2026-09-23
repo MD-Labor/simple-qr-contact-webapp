@@ -1,0 +1,279 @@
+"""apps.labor.maryland.dev - QR code API.
+
+Routes (everything else is served from site/ by the static assets binding):
+
+    GET /api/qr[.png|.svg]      encode any string          ?data=<text>
+    GET /api/mecard[.png|.svg]  build + encode a MECARD    ?first=&last=&...
+    GET /api                    endpoint reference (JSON)
+
+The extension is a courtesy for callers that want to pin a format; ?format=
+does the same thing, and the default is PNG because that is what email clients
+can actually render inside a signature.
+"""
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from pyodide.ffi import to_js
+from workers import Response, WorkerEntrypoint
+
+import mecard
+import qrrender
+
+# Bundled logo assets must sit directly beside this file: pywrangler only ships
+# files in the entrypoint's own directory, so a subdirectory would be missing at
+# runtime (FileNotFoundError on /session/metadata/...).
+HERE = Path(__file__).parent
+
+# The SVG logo stays vector inside SVG output. PNG output needs a raster logo
+# because rasterizing SVG would require cairosvg, which cannot run on Workers -
+# scripts/bake_logo.py pre-renders this from the same source SVG.
+LOGOS = {
+    "md": {"svg": HERE / "maryland-logo.svg", "png": HERE / "maryland-logo.png"},
+}
+
+DEFAULT_LOGO = "md"
+MAX_DATA_LEN = 2000
+
+ORG_NAME = "Maryland Department of Labor"
+ORG_URL = "https://labor.maryland.gov/"
+
+CACHE_CONTROL = "public, max-age=86400"
+
+
+class ApiError(Exception):
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+
+
+def _one(params, key, default=None):
+    values = params.get(key)
+    if not values:
+        return default
+    value = values[0].strip()
+    return value if value else default
+
+
+def _flag(params, key, default=False):
+    value = _one(params, key)
+    if value is None:
+        return default
+    return value.lower() in ("1", "true", "yes", "on")
+
+
+def _float(params, key, default):
+    value = _one(params, key)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        raise ApiError(f"'{key}' must be a number, got {value!r}")
+
+
+def _int(params, key, default, minimum, maximum):
+    value = _one(params, key)
+    if value is None:
+        return default
+    try:
+        number = int(value)
+    except ValueError:
+        raise ApiError(f"'{key}' must be a whole number, got {value!r}")
+    if not minimum <= number <= maximum:
+        raise ApiError(f"'{key}' must be between {minimum} and {maximum}, got {number}")
+    return number
+
+
+def _resolve_logo(params, fmt):
+    """Return the logo file for this output format, or None for a bare code."""
+    name = (_one(params, "logo", DEFAULT_LOGO) or "").lower()
+    if name in ("none", "off", "no"):
+        return None
+    if name not in LOGOS:
+        known = ", ".join(sorted(LOGOS) + ["none"])
+        raise ApiError(f"Unknown logo {name!r}. Available: {known}.")
+    return LOGOS[name]["svg" if fmt == "svg" else "png"]
+
+
+def _render(data, params, fmt):
+    if len(data) > MAX_DATA_LEN:
+        raise ApiError(
+            f"'data' is {len(data)} characters; the limit is {MAX_DATA_LEN}. "
+            "A QR code this dense would not scan reliably."
+        )
+
+    logo = _resolve_logo(params, fmt)
+
+    level_name = (_one(params, "ec", "") or "").upper()
+    if not level_name:
+        level_name = qrrender.default_error_level(logo is not None)
+    if level_name not in qrrender.ERROR_LEVELS:
+        raise ApiError(
+            f"'ec' must be one of L, M, Q, H - got {level_name!r}."
+        )
+
+    logo_scale = _float(params, "scale", qrrender.DEFAULT_LOGO_SCALE)
+    if logo is not None and not 0.0 < logo_scale < 1.0:
+        raise ApiError(f"'scale' must be greater than 0 and less than 1, got {logo_scale}.")
+
+    fg = _one(params, "fg") or _one(params, "color", "black")
+    bg = _one(params, "bg", "white")
+    backing = _one(params, "backing", "white")
+    square = _flag(params, "square")
+    box = _int(params, "box", 10, 1, 40)
+
+    try:
+        qr = qrrender.build_qr(data, qrrender.ERROR_LEVELS[level_name], box_size=box)
+    except Exception as exc:
+        raise ApiError(f"Could not encode that data: {exc}")
+
+    # Verified by decoding real output: at scale 0.35 the logo swallows more
+    # modules than error correction can rebuild and the code stops decoding
+    # entirely. We still honour the request - the CLI does - but say so.
+    warning = None
+    if logo is not None and logo_scale > qrrender.MAX_SAFE_LOGO_SCALE:
+        warning = (
+            f"logo scale {logo_scale} is above {qrrender.MAX_SAFE_LOGO_SCALE}; "
+            "this code may not scan. Test it with a phone before using it."
+        )
+
+    if fmt == "svg":
+        body = qrrender.render_svg(qr, fg, bg, logo, logo_scale, backing, square)
+        headers = {
+            "Content-Type": "image/svg+xml; charset=utf-8",
+            "Cache-Control": CACHE_CONTROL,
+        }
+        if warning:
+            headers["X-QR-Warning"] = warning
+        return Response(body, headers=headers)
+
+    png = qrrender.render_raster(qr, "png", fg, bg, logo, logo_scale, backing, square)
+    headers = {"Content-Type": "image/png", "Cache-Control": CACHE_CONTROL}
+    if warning:
+        headers["X-QR-Warning"] = warning
+    return Response(to_js(png).buffer, headers=headers)
+
+
+def _mecard_from_params(params):
+    phones = []
+    for key in ("mobile", "office", "tel"):
+        value = _one(params, key)
+        if value:
+            phones.append(value)
+
+    first = _one(params, "first", "") or ""
+    last = _one(params, "last", "") or ""
+    email = _one(params, "email", "") or ""
+
+    # 'url' and 'org' have defaults, so without this check a request carrying no
+    # fields at all would still encode successfully - as a card holding nothing
+    # but our website, which is not a contact.
+    if not (first or last or email or phones):
+        raise ApiError(
+            "A contact card needs at least a name, phone number, or email. "
+            "Example: /api/mecard.png?first=Jay&last=Huie&email=jay.huie@maryland.gov"
+        )
+
+    try:
+        return mecard.build(
+            first=first,
+            last=last,
+            phones=phones,
+            email=email,
+            url=_one(params, "url", ORG_URL) or "",
+            # ORG is off by default on purpose: it adds ~33 characters, which
+            # pushes a typical card from QR version 9 to 11 (61 -> 69 modules).
+            # At the ~150px a signature displays, that density starts to fail.
+            org=_one(params, "org", "") or "",
+            note=_one(params, "note", "") or "",
+        )
+    except ValueError as exc:
+        raise ApiError(str(exc))
+
+
+def _split_route(path):
+    """'/api/qr.svg' -> ('qr', 'svg'). Missing extension yields the PNG default."""
+    route = path[len("/api/"):]
+    for ext in ("png", "svg"):
+        if route.endswith("." + ext):
+            return route[: -(len(ext) + 1)], ext
+    if "." in route:
+        bad = route.rsplit(".", 1)[1]
+        raise ApiError(f"Unsupported format '.{bad}'. Use .png or .svg.", status=404)
+    return route, None
+
+
+def _index():
+    return Response.json(
+        {
+            "endpoints": {
+                "GET /api/qr[.png|.svg]": {
+                    "description": "Encode any string as a QR code.",
+                    "required": {"data": "text to encode"},
+                },
+                "GET /api/mecard[.png|.svg]": {
+                    "description": "Build a MECARD contact card and encode it.",
+                    "optional": {
+                        "first": "given name",
+                        "last": "family name",
+                        "mobile": "mobile number",
+                        "office": "office number",
+                        "tel": "additional number",
+                        "email": "email address",
+                        "org": f"organization, omitted unless set (e.g. {ORG_NAME}); "
+                               "adds ~33 characters and a denser code",
+                        "url": f"website (default: {ORG_URL})",
+                        "note": "free-text note",
+                    },
+                },
+            },
+            "shared_options": {
+                "format": "png (default) or svg; the path extension wins",
+                "logo": f"{DEFAULT_LOGO} (default) or none",
+                "ec": "error correction L, M, Q, H (default H with a logo, else M)",
+                "scale": f"logo size as a fraction of width (default {qrrender.DEFAULT_LOGO_SCALE}; "
+                         f"above {qrrender.MAX_SAFE_LOGO_SCALE} often stops scanning)",
+                "fg": "foreground color (default black)",
+                "bg": "background color, or 'transparent' (default white)",
+                "backing": "color behind the logo (default white)",
+                "square": "1 to force a square logo backing",
+                "box": "pixels per QR module, 1-40 (default 10)",
+            },
+        }
+    )
+
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        url = urlparse(request.url)
+        path = url.path.rstrip("/") or "/"
+
+        if path == "/api":
+            return _index()
+
+        if not path.startswith("/api/"):
+            return Response.json({"error": f"No such endpoint: {path}"}, status=404)
+
+        try:
+            route, ext = _split_route(path)
+
+            fmt = ext or (_one(parse_qs(url.query), "format", "png") or "png").lower()
+            if fmt not in ("png", "svg"):
+                raise ApiError(f"Unsupported format {fmt!r}. Use png or svg.")
+
+            params = parse_qs(url.query, keep_blank_values=False)
+
+            if route == "qr":
+                data = _one(params, "data")
+                if data is None:
+                    raise ApiError("'data' is required. Example: /api/qr.svg?data=hello")
+                return _render(data, params, fmt)
+
+            if route == "mecard":
+                return _render(_mecard_from_params(params), params, fmt)
+
+            raise ApiError(f"No such endpoint: {path}", status=404)
+
+        except ApiError as exc:
+            return Response.json({"error": exc.message}, status=exc.status)
