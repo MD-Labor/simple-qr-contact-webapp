@@ -42,26 +42,16 @@
 
 				<div id="fieldMobile">
 					<label class="sr-only" for="inMobile">Mobile number</label>
-					<input type="tel" id="inMobile" placeholder="Mobile: 555-555-5555">
+					<input type="tel" id="inMobile" inputmode="tel" maxlength="20" autocomplete="tel-national" placeholder="Mobile: (555) 555-5555">
 				</div>
 				<div id="fieldOffice" class="hidden-field">
 					<label class="sr-only" for="inOffice">Office number</label>
-					<input type="tel" id="inOffice" placeholder="Office: 555-555-5555">
+					<input type="tel" id="inOffice" inputmode="tel" maxlength="20" placeholder="Office: (555) 555-5555">
 				</div>
 				<div id="fieldFax" class="hidden-field">
 					<label class="sr-only" for="inFax">Fax number</label>
-					<input type="tel" id="inFax" placeholder="Fax: 555-555-5555">
+					<input type="tel" id="inFax" inputmode="tel" maxlength="20" placeholder="Fax: (555) 555-5555">
 				</div>
-			</fieldset>
-
-			<fieldset class="form-group">
-				<legend>Contact QR code</legend>
-				<label class="phone-check"><input type="checkbox" id="chkQr" checked> Include a QR code that saves my contact details</label>
-				<p class="hint">
-					Scanning it adds your name, phone and email straight to a phone's contacts.
-					Leave the organization out unless you need it &mdash; it makes the code denser and harder to scan.
-				</p>
-				<label class="phone-check"><input type="checkbox" id="chkQrOrg"> Include &ldquo;Maryland Department of Labor&rdquo; in the QR code</label>
 			</fieldset>
 		</form>
 
@@ -79,13 +69,13 @@
 							</a>
 							<div style="padding-top: 10px;">
 								<a href="https://www.facebook.com/MarylandLabor" style="text-decoration: none; display: inline-block; margin-right: 5px;">
-									<img src="https://labor.maryland.gov/images/signature/FB.png" alt="Visit Maryland Labor on Facebook" width="23" height="23" style="border: 0;">
+									<img src="https://labor.maryland.gov/images/signature/FB.png" alt="Visit Maryland Labor on Facebook" width="23" height="23" style="display: inline-block; border: 0;">
 								</a>
 								<a href="https://www.linkedin.com/company/maryland-department-of-labor/" style="text-decoration: none; display: inline-block; margin-right: 5px;">
-									<img src="https://labor.maryland.gov/images/signature/LinkedIn.png" alt="Visit Maryland Labor on LinkedIn" width="23" height="23" style="border: 0;">
+									<img src="https://labor.maryland.gov/images/signature/LinkedIn.png" alt="Visit Maryland Labor on LinkedIn" width="23" height="23" style="display: inline-block; border: 0;">
 								</a>
 								<a href="https://www.instagram.com/md_labor/" style="text-decoration: none; display: inline-block;">
-									<img src="https://labor.maryland.gov/images/signature/IG.png" alt="Visit Maryland Labor on Instagram" width="23" height="23" style="border: 0;">
+									<img src="https://labor.maryland.gov/images/signature/IG.png" alt="Visit Maryland Labor on Instagram" width="23" height="23" style="display: inline-block; border: 0;">
 								</a>
 							</div>
 						</td>
@@ -105,10 +95,6 @@
 								<div id="outFaxRow" style="display:none;"><span id="outFax"></span></div>
 							</div>
 						</td>
-
-						<td id="outQrCell" style="vertical-align: middle; padding-left: 15px;">
-							<img id="outQr" src="" alt="QR code containing this person's contact details" width="150" height="150" style="display: block; border: 0;">
-						</td>
 					</tr>
 				</tbody>
 			</table>
@@ -119,20 +105,21 @@
 			<span class="success-msg" id="msg" role="status" aria-live="polite"></span>
 		</div>
 
-		<details class="downloads">
-			<summary>Download the QR code on its own</summary>
-			<p class="hint">Useful for slides, business cards, or print. SVG stays sharp at any size.</p>
-			<p>
+		<h2>Contact QR code</h2>
+		<p class="hint">
+			Built from the details above. Scanning it saves your name, organization, phone and
+			email straight to a phone's contacts. It is not part of the signature &mdash; download
+			it if you want it on a slide, a badge, or a business card.
+		</p>
+		<div class="qr-box">
+			<img id="outQr" src="" alt="" width="300" height="300" hidden>
+			<p class="hint" id="qrEmpty">Enter a name, phone number, or email address above.</p>
+			<p class="qr-links">
 				<a id="dlPng" href="#" download>Download PNG</a>
 				&nbsp;&middot;&nbsp;
 				<a id="dlSvg" href="#" download>Download SVG</a>
 			</p>
-		</details>
-
-		<p class="footnote" id="devNote" hidden>
-			You are previewing from a local address, so the QR image in a copied signature
-			would not load for recipients. Generate your signature from the deployed site.
-		</p>
+		</div>
 	</div>
 
 	<script type="module" src="/sig/main.js"></script>
