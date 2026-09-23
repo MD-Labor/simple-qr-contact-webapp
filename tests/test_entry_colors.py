@@ -1,25 +1,11 @@
 """Colour validation on the API surface.
 
-entry.py only runs on Workers, so the two runtime modules it imports are
-stubbed here. Everything exercised below is plain Python.
+conftest.py stubs the two Workers-only modules entry.py imports; everything
+exercised below is plain Python.
 """
-import sys
-import types
-
 import pytest
 
-for name, attrs in (
-    ("pyodide", {}),
-    ("pyodide.ffi", {"to_js": lambda value: value}),
-    ("workers", {"Response": object, "WorkerEntrypoint": type("WorkerEntrypoint", (), {})}),
-):
-    module = types.ModuleType(name)
-    for attr, value in attrs.items():
-        setattr(module, attr, value)
-    sys.modules.setdefault(name, module)
-sys.modules["pyodide"].ffi = sys.modules["pyodide.ffi"]
-
-import entry  # noqa: E402  (needs the stubs above)
+import entry
 
 
 class TestColorValidation:
@@ -65,3 +51,34 @@ class TestColorValidation:
         assert str(entry.MAX_COLOR_LEN) in exc.value.message
         assert huge not in exc.value.message
         assert exc.value.status == 400
+
+    def test_a_trailing_newline_does_not_slip_past_the_grammar(self):
+        with pytest.raises(entry.ApiError):
+            entry._check_color("fg", "red\n")
+
+
+class TestRenderColors:
+    """_render is the only caller; params arrive shaped like parse_qs output."""
+
+    def test_a_huge_fg_is_refused_before_anything_is_rendered(self):
+        with pytest.raises(entry.ApiError) as exc:
+            entry._render("hello", {"fg": ["b" * 14000], "logo": ["none"]}, "svg")
+        assert exc.value.status == 400
+
+    def test_the_color_alias_is_named_in_its_own_error(self):
+        with pytest.raises(entry.ApiError) as exc:
+            entry._render("hello", {"color": ["b" * 100], "logo": ["none"]}, "svg")
+        assert exc.value.message.startswith("'color'")
+
+    def test_a_color_svg_takes_but_pillow_cannot_read_is_a_400_not_a_500(self):
+        params = {"fg": ["rgba(255, 0, 0, 0.5)"], "logo": ["none"]}
+        assert entry._render("hello", params, "svg").status == 200
+        with pytest.raises(entry.ApiError) as exc:
+            entry._render("hello", params, "png")
+        assert exc.value.status == 400
+
+    def test_the_rendered_svg_carries_the_color_once(self):
+        response = entry._render(
+            "hello", {"fg": ["#123456"], "logo": ["none"]}, "svg"
+        )
+        assert response.body.count("#123456") == 1

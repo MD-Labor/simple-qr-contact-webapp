@@ -299,6 +299,8 @@ The CLI passes colors straight through: anything Pillow accepts for raster outpu
 
 The API is stricter, because its colors come from the query string of an anonymous request: `fg` / `color`, `bg`, and `backing` must be a color name, a `#rgb` / `#rgba` / `#rrggbb` / `#rrggbbaa` hex code, or an `rgb()` / `rgba()` / `hsl()` / `hsla()` value, and at most 64 characters. Anything else is a `400`.
 
+Passing that grammar doesn't mean every renderer can read the value. PNG output goes through Pillow, which wants comma-separated arguments and an integer 0–255 alpha — `rgba(255, 0, 0, 128)` and `hsl(210, 100%, 50%)` work, `rgba(255, 0, 0, 0.5)` and `hsl(210 100% 50%)` don't, and `transparent` is a background-only value there. SVG takes all of them. A color the SVG path accepts but Pillow rejects also comes back as a `400`, naming the value. Named colors and hex codes work everywhere.
+
 Keep contrast high. Very light foreground or very dark background will make the code hard to scan — aim for at least a 4.5:1 contrast ratio between foreground and background.
 
 ## License

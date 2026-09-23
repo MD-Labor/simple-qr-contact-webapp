@@ -115,7 +115,7 @@ class TestRenderSvg:
         svg = qrrender.render_svg(build(), "navy", "white", LOGO_SVG, 0.22, "white", False)
         root = ET.fromstring(svg)
         group = root.find("{http://www.w3.org/2000/svg}g")
-        assert group.find("{http://www.w3.org/2000/svg}svg") is None
+        assert group.find(".//{http://www.w3.org/2000/svg}svg") is None
         assert root.find("{http://www.w3.org/2000/svg}svg") is not None
 
     def test_colors_are_xml_escaped(self):

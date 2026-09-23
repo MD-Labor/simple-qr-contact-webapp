@@ -53,11 +53,11 @@ MAX_COLOR_LEN = 64
 # defence rather than the only one.
 COLOR_RE = re.compile(
     r"""
-    ^(?:
+    (?:
         [A-Za-z]{1,32}
       | \#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})
       | (?:rgb|rgba|hsl|hsla)\([0-9A-Za-z.,%/+\s-]{1,40}\)
-    )$
+    )
     """,
     re.VERBOSE,
 )
@@ -138,7 +138,8 @@ def _check_color(key, value):
         raise ApiError(
             f"'{key}' is {len(value)} characters; the limit is {MAX_COLOR_LEN}."
         )
-    if not COLOR_RE.match(value):
+    # fullmatch, not match: '$' would let a trailing newline through.
+    if not COLOR_RE.fullmatch(value):
         raise ApiError(
             f"'{key}' must be a color name, a #rgb/#rrggbb hex code, or an "
             f"rgb()/hsl() value - got {value!r}."
@@ -178,7 +179,8 @@ def _render(data, params, fmt):
     if logo is not None and not 0.0 < logo_scale < 1.0:
         raise ApiError(f"'scale' must be greater than 0 and less than 1, got {logo_scale}.")
 
-    fg = _check_color("fg", _one(params, "fg") or _one(params, "color", "black"))
+    fg_key = "fg" if _one(params, "fg") else "color"
+    fg = _check_color(fg_key, _one(params, "fg") or _one(params, "color", "black"))
     bg = _check_color("bg", _one(params, "bg", "white"))
     backing = _check_color("backing", _one(params, "backing", "white"))
     square = _flag(params, "square")
@@ -209,7 +211,15 @@ def _render(data, params, fmt):
             headers["X-QR-Warning"] = warning
         return Response(body, headers=headers)
 
-    png = qrrender.render_raster(qr, "png", fg, bg, logo, logo_scale, backing, square)
+    # PNG colours go through Pillow, which reads fewer forms than SVG does:
+    # no 'transparent' foreground, no fractional rgba() alpha, no space-
+    # separated hsl(). A colour the grammar above allows but Pillow cannot
+    # read is the caller's mistake, so answer 400 rather than letting the
+    # ValueError escape as a 500.
+    try:
+        png = qrrender.render_raster(qr, "png", fg, bg, logo, logo_scale, backing, square)
+    except ValueError as exc:
+        raise ApiError(f"Could not render that PNG: {exc}")
     headers = {"Content-Type": "image/png", "Cache-Control": CACHE_CONTROL}
     if warning:
         headers["X-QR-Warning"] = warning
