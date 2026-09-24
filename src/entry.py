@@ -14,8 +14,9 @@ The extension is a courtesy for callers that want to pin a format; ?format=
 does the same thing, and the default is PNG because that is what email clients
 can actually render inside a signature.
 """
-import re
+import asyncio
 import json
+import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -25,7 +26,6 @@ from workers import Response, WorkerEntrypoint
 import mecard
 import qrrender
 import vcard
-
 from auth import get_auth_context
 
 # Bundled logo assets must sit directly beside this file: pywrangler only ships
@@ -372,19 +372,31 @@ def _index():
     )
 
 
+async def _log_access(request, env, path):
+    """Log who made this request. Permissive: it records, it never refuses.
+
+    Every request is logged, not just authenticated ones - Access should make
+    unauthenticated requests impossible, so one showing up here is the signal.
+    One JSON object per line, so Workers Logs indexes each key as a field.
+    """
+    who = await get_auth_context(request, env)
+    print(json.dumps({
+        "message": "MD Labor Apps Access",
+        "path": path,
+        "authenticated": who.is_authenticated,
+        "by": who.email,
+    }))
+
+
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
         url = urlparse(request.url)
         path = url.path.rstrip("/") or "/"
 
-        ctx = await get_auth_context(request, self.env)
-        #if ctx.is_authenticated: ## Logging all items for now - should never be unauthenticated access
-        print(json.dumps({
-            "message": "MD Labor Apps Access",
-            "path": path,
-            "authenticated": ctx.is_authenticated,
-            "by": ctx.email,
-        }))
+        # waitUntil runs the log after the response has gone out, so a JWKS
+        # fetch on a cold cache never delays the caller. ensure_future, as the
+        # SDK's own ASGI adapter does, hands JS a task that is already running.
+        self.ctx.waitUntil(asyncio.ensure_future(_log_access(request, self.env, path)))
 
         if path == "/api":
             return _index()

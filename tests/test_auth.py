@@ -79,7 +79,17 @@ def jwks(monkeypatch):
         return FakeFetchResponse({"keys": served["keys"]}, served["status"])
 
     monkeypatch.setattr(auth, "fetch", fake_fetch)
+    # The cache is module state; without this, tests would see each other's keys.
+    monkeypatch.setattr(auth, "_jwks_cache", {})
     return served
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """A controllable time.time(), starting at the real now."""
+    now = {"t": time.time()}
+    monkeypatch.setattr(auth.time, "time", lambda: now["t"])
+    return now
 
 
 def env(**overrides):
@@ -197,3 +207,50 @@ class TestRefused:
     ])
     def test_malformed(self, jwks, jwt):
         assert_refused(context(jwt))
+
+
+class TestJwksCache:
+    def test_keys_are_fetched_once_per_isolate(self, jwks):
+        for _ in range(3):
+            assert context(sign(claims())).is_authenticated
+        assert len(jwks["urls"]) == 1
+
+    def test_keys_are_refetched_after_the_ttl(self, jwks, clock):
+        assert context(sign(claims())).is_authenticated
+        clock["t"] += auth.JWKS_TTL_SECONDS - 1
+        assert context(sign(claims())).is_authenticated
+        assert len(jwks["urls"]) == 1
+        clock["t"] += 2
+        assert context(sign(claims())).is_authenticated
+        assert len(jwks["urls"]) == 2
+
+    def test_a_rotated_key_is_picked_up_without_waiting_for_the_ttl(self, jwks, clock):
+        assert context(sign(claims())).is_authenticated
+        new_key = make_key()
+        jwks["keys"] = [jwk_for(KEY), jwk_for(new_key, kid="rotated")]
+        clock["t"] += auth.JWKS_MIN_REFRESH_SECONDS
+        assert context(sign(claims(), key=new_key, kid="rotated")).is_authenticated
+        assert len(jwks["urls"]) == 2
+
+    def test_unknown_kids_cannot_force_a_fetch_per_request(self, jwks, clock):
+        assert context(sign(claims())).is_authenticated
+        for _ in range(5):
+            assert_refused(context(sign(claims(), kid="junk")))
+        assert len(jwks["urls"]) == 1
+        clock["t"] += auth.JWKS_MIN_REFRESH_SECONDS
+        assert_refused(context(sign(claims(), kid="junk")))
+        assert len(jwks["urls"]) == 2
+
+    def test_a_failed_refresh_does_not_poison_the_cache(self, jwks, clock):
+        assert context(sign(claims())).is_authenticated
+        jwks["status"] = 503
+        clock["t"] += auth.JWKS_TTL_SECONDS
+        assert_refused(context(sign(claims())))
+        jwks["status"] = 200
+        assert context(sign(claims())).is_authenticated
+        assert len(jwks["urls"]) == 3
+
+    def test_a_cached_key_still_checks_the_signature(self, jwks):
+        assert context(sign(claims())).is_authenticated
+        assert_refused(context(sign(claims(), key=make_key())))
+        assert len(jwks["urls"]) == 1

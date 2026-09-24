@@ -37,6 +37,20 @@ SHA256_DIGEST_INFO = bytes.fromhex("3031300d060960864801650304020105000420")
 # forgeable, so it is refused rather than trusted.
 MIN_RSA_BITS = 2048
 
+# The team's public keys are cached per isolate, which lives across many
+# requests, so most requests verify without a round trip. Access rotates its
+# signing key every six weeks and keeps publishing the previous one for a week
+# after, so an hour-old copy is always new enough for tokens already issued.
+JWKS_TTL_SECONDS = 3600
+
+# A kid missing from the cache usually means a rotation this isolate has not
+# seen yet, so it forces a refetch - but no more often than this, so a stream of
+# tokens with made-up kids cannot turn every request back into a round trip.
+JWKS_MIN_REFRESH_SECONDS = 60
+
+# certs URL -> (fetched_at, keys)
+_jwks_cache = {}
+
 
 @dataclass
 class AuthContext:
@@ -83,13 +97,47 @@ def _rs256_verify(jwk, signing_input, signature):
     return hmac.compare_digest(decrypted, expected)
 
 
-async def _fetch_jwks(team_domain):
-    certs_url = f"{team_domain.rstrip('/')}/cdn-cgi/access/certs"
+async def _fetch_jwks(certs_url):
     res = await fetch(certs_url)
     if not res.ok:
         log.warning("[auth] JWKS fetch failed (%s) from %s", res.status, certs_url)
         return None
-    return await res.json()
+    keys = (await res.json()).get("keys")
+    if not isinstance(keys, list):
+        log.warning("[auth] JWKS from %s has no key list", certs_url)
+        return None
+    return keys
+
+
+def _find_key(keys, kid):
+    return next((key for key in keys if key.get("kid") == kid), None)
+
+
+async def _get_jwk(team_domain, kid):
+    """The team's public key for this kid, from the cache when it can be."""
+    certs_url = f"{team_domain.rstrip('/')}/cdn-cgi/access/certs"
+    now = time.time()
+
+    cached = _jwks_cache.get(certs_url)
+    if cached is not None:
+        fetched_at, keys = cached
+        age = now - fetched_at
+        jwk = _find_key(keys, kid)
+        if age < JWKS_TTL_SECONDS and (jwk is not None or age < JWKS_MIN_REFRESH_SECONDS):
+            if jwk is None:
+                log.warning("[auth] JWT Key ID not found in JWKS")
+            return jwk
+
+    keys = await _fetch_jwks(certs_url)
+    if keys is None:
+        # A failed fetch leaves any older copy in place for the next request.
+        return None
+    _jwks_cache[certs_url] = (now, keys)
+
+    jwk = _find_key(keys, kid)
+    if jwk is None:
+        log.warning("[auth] JWT Key ID not found in JWKS")
+    return jwk
 
 
 async def verify_cloudflare_jwt(jwt, env):
@@ -130,14 +178,8 @@ async def verify_cloudflare_jwt(jwt, env):
             log.warning("[auth] JWT audience mismatch")
             return None
 
-        jwks = await _fetch_jwks(env.CLOUDFLARE_TEAM_DOMAIN)
-        if jwks is None:
-            return None
-
-        kid = header.get("kid")
-        jwk = next((key for key in jwks.get("keys", []) if key.get("kid") == kid), None)
+        jwk = await _get_jwk(env.CLOUDFLARE_TEAM_DOMAIN, header.get("kid"))
         if jwk is None:
-            log.warning("[auth] JWT Key ID not found in JWKS")
             return None
 
         signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
