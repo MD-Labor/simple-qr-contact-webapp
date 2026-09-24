@@ -15,6 +15,7 @@ does the same thing, and the default is PNG because that is what email clients
 can actually render inside a signature.
 """
 import re
+import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -24,6 +25,8 @@ from workers import Response, WorkerEntrypoint
 import mecard
 import qrrender
 import vcard
+
+from auth import get_auth_context
 
 # Bundled logo assets must sit directly beside this file: pywrangler only ships
 # files in the entrypoint's own directory, so a subdirectory would be missing at
@@ -373,6 +376,15 @@ class Default(WorkerEntrypoint):
     async def fetch(self, request):
         url = urlparse(request.url)
         path = url.path.rstrip("/") or "/"
+
+        ctx = await get_auth_context(request, self.env)
+        #if ctx.is_authenticated: ## Logging all items for now - should never be unauthenticated access
+        print(json.dumps({
+            "message": "MD Labor Apps Access",
+            "path": path,
+            "authenticated": ctx.is_authenticated,
+            "by": ctx.email,
+        }))
 
         if path == "/api":
             return _index()
