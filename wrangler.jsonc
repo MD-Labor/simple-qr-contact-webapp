@@ -31,7 +31,9 @@
 	],
 	"vars": {
 		"CLOUDFLARE_TEAM_DOMAIN": "https:\/\/md-labor.cloudflareaccess.com",
-		"CLOUDFLARE_POLICY_AUD": "d25aba2c6175c7f1e619b3962066c6a6e623873c901d5651cee81642144eca33"
+		// AUD of the "Anything and Everything in DEV" Access application, whose
+		// *.labor.maryland.dev wildcard is what covers apps.labor.maryland.dev.
+		"CLOUDFLARE_POLICY_AUD": "8d793eda8a2b23070b39b503b67adcb4a9ef36b24eb825713dad30c6dcb0b5ca"
 	},
 	"assets": {
 		"directory": "./site",
