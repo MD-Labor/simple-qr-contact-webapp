@@ -32,6 +32,10 @@ class FakeBuffer:
         self.buffer = value
 
 
+async def unpatched_fetch(url, **kwargs):
+    raise AssertionError(f"test made a real fetch to {url}; monkeypatch it")
+
+
 for _name, _attrs in (
     ("pyodide", {}),
     ("pyodide.ffi", {"to_js": FakeBuffer}),
@@ -40,6 +44,7 @@ for _name, _attrs in (
         {
             "Response": FakeResponse,
             "WorkerEntrypoint": type("WorkerEntrypoint", (), {}),
+            "fetch": unpatched_fetch,
         },
     ),
 ):
