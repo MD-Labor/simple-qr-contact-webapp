@@ -27,4 +27,8 @@ dev = [
     # SVG -> PNG for scripts/bake_logo.py only. Never imported by the Worker.
     "resvg-py",
     "pytest",
+    # Signs test JWTs for tests/test_auth.py, and so checks src/auth.py's RSA
+    # verification against an independent implementation. Never imported by
+    # the Worker.
+    "cryptography>=50.0.1",
 ]
