@@ -29,6 +29,10 @@
 			"fallthrough": true
 		}
 	],
+	"vars": {
+		"CLOUDFLARE_TEAM_DOMAIN": "https:\/\/md-labor.cloudflareaccess.com",
+		"CLOUDFLARE_POLICY_AUD": "d25aba2c6175c7f1e619b3962066c6a6e623873c901d5651cee81642144eca33"
+	},
 	"assets": {
 		"directory": "./site",
 		"not_found_handling": "404-page",
