@@ -32,13 +32,24 @@ class FakeBuffer:
         self.buffer = value
 
 
+class FakeProxy:
+    """Stands in for the PyProxy create_proxy() returns."""
+
+    def __init__(self, obj):
+        self.obj = obj
+        self.destroyed = False
+
+    def destroy(self):
+        self.destroyed = True
+
+
 async def unpatched_fetch(url, **kwargs):
     raise AssertionError(f"test made a real fetch to {url}; monkeypatch it")
 
 
 for _name, _attrs in (
     ("pyodide", {}),
-    ("pyodide.ffi", {"to_js": FakeBuffer}),
+    ("pyodide.ffi", {"to_js": FakeBuffer, "create_proxy": FakeProxy}),
     (
         "workers",
         {

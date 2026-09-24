@@ -11,6 +11,7 @@ import pytest
 
 import auth
 import entry
+from conftest import FakeProxy
 
 
 class FakeExecutionContext:
@@ -43,14 +44,24 @@ def test_the_log_is_handed_to_wait_until_and_written_as_json(worker, capsys):
         # The response is back; the log has been scheduled but not yet written.
         assert capsys.readouterr().out == ""
         assert len(worker.ctx.pending) == 1
-        await worker.ctx.pending[0]
+        # A bare task would get Pyodide's implicit proxy, destroyed as soon as
+        # waitUntil returns; it has to be an explicit one...
+        proxy = worker.ctx.pending[0]
+        assert isinstance(proxy, FakeProxy)
+        assert not proxy.destroyed
+        await proxy.obj
+        # ...released once the task settles (done callbacks run a tick later).
+        await asyncio.sleep(0)
+        assert proxy.destroyed
         return response
 
     response = asyncio.run(run())
     assert response.status == 200
     assert json.loads(capsys.readouterr().out) == {
         "message": "MD Labor Apps Access",
-        "path": "/api",
-        "authenticated": True,
-        "by": "jay.huie@maryland.gov",
+        "app_access": {
+            "is_authenticated": True,
+            "by": "jay.huie@maryland.gov",
+            "path": "/api",
+        },
     }

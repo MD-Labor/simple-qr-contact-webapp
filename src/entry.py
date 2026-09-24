@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from pyodide.ffi import to_js
+from pyodide.ffi import create_proxy, to_js
 from workers import Response, WorkerEntrypoint
 
 import mecard
@@ -377,14 +377,17 @@ async def _log_access(request, env, path):
 
     Every request is logged, not just authenticated ones - Access should make
     unauthenticated requests impossible, so one showing up here is the signal.
-    One JSON object per line, so Workers Logs indexes each key as a field.
+    One JSON object per line, so Workers Logs indexes each key as a field; the
+    access details sit together under app_access (app_access.by, and so on).
     """
     who = await get_auth_context(request, env)
     print(json.dumps({
         "message": "MD Labor Apps Access",
-        "path": path,
-        "authenticated": who.is_authenticated,
-        "by": who.email,
+        "app_access": {
+            "is_authenticated": who.is_authenticated,
+            "by": who.email,
+            "path": path,
+        },
     }))
 
 
@@ -396,7 +399,14 @@ class Default(WorkerEntrypoint):
         # waitUntil runs the log after the response has gone out, so a JWKS
         # fetch on a cold cache never delays the caller. ensure_future, as the
         # SDK's own ASGI adapter does, hands JS a task that is already running.
-        self.ctx.waitUntil(asyncio.ensure_future(_log_access(request, self.env, path)))
+        # The task must cross into JS through create_proxy: Pyodide destroys the
+        # proxy it makes implicitly for an argument as soon as the call returns,
+        # which would leave waitUntil holding a dead promise. This proxy lives
+        # until the task settles instead.
+        task = asyncio.ensure_future(_log_access(request, self.env, path))
+        task_proxy = create_proxy(task)
+        task.add_done_callback(lambda _: task_proxy.destroy())
+        self.ctx.waitUntil(task_proxy)
 
         if path == "/api":
             return _index()
